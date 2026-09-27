@@ -118,7 +118,7 @@ export default function Home() {
     setSearchError('');
     searchRemoteFunds(value)
       .then((rows) => { if (id === searchId.current) setResults(rows.slice(0, 8)); })
-      .catch(() => { if (id === searchId.current) setSearchError('搜索服务暂时不可用，请稍后重试'); })
+      .catch((error) => { if (id === searchId.current) setSearchError(error.message || '搜索服务暂时不可用，请稍后重试'); })
       .finally(() => { if (id === searchId.current) setSearching(false); });
   }, [debouncedQuery]);
 
@@ -128,9 +128,20 @@ export default function Home() {
     if (!rangedPoints.length) return null;
     const first = rangedPoints[0];
     const latest = rangedPoints.at(-1);
+    const previous = rangedPoints.at(-2) || null;
     const high = rangedPoints.reduce((current, point) => point.value > current.value ? point : current);
     const low = rangedPoints.reduce((current, point) => point.value < current.value ? point : current);
-    return { first, latest, high, low, total: (latest.value / first.value - 1) * 100 };
+    return {
+      first,
+      latest,
+      previous,
+      high,
+      low,
+      total: (latest.value / first.value - 1) * 100,
+      daily: previous ? (latest.value / previous.value - 1) * 100 : null,
+      drawdown: (latest.value / high.value - 1) * 100,
+      rebound: (latest.value / low.value - 1) * 100,
+    };
   }, [rangedPoints]);
 
   const saveWatch = (next) => {
@@ -203,7 +214,7 @@ export default function Home() {
           {selected && stats && <>
             <div className="detail-head">
               <div><span className="eyebrow">LIVE FUND OVERVIEW</span><h2>{selected.name}</h2><p>{selected.code} · 净值数据实时获取</p></div>
-              <div className="latest"><small>最新单位净值</small><strong>{stats.latest.value.toFixed(4)}</strong><span>{formatDate(stats.latest.timestamp)}</span></div>
+              <div className="latest"><small>最新单位净值</small><strong>{stats.latest.value.toFixed(4)}</strong><span>{formatDate(stats.latest.timestamp)}</span>{stats.daily != null && <span className={stats.daily >= 0 ? 'rise' : 'fall'}>日涨跌 {formatPercent(stats.daily)}</span>}</div>
             </div>
             <div className="period-bar">
               <div className="quick-days">{QUICK_DAYS.map((item) => <button className={days === item ? 'active' : ''} key={item} onClick={() => { setDays(item); setCustomDays(''); }}>{item}天</button>)}</div>
@@ -215,9 +226,12 @@ export default function Home() {
             </div>
             <div className="detail-body">
               <div className="metrics">
-                <article><span>{days} 天总涨跌幅</span><strong className={stats.total >= 0 ? 'rise' : 'fall'}>{formatPercent(stats.total)}</strong><small>{stats.first.value.toFixed(4)} → {stats.latest.value.toFixed(4)}</small></article>
+                <article><span>最新净值</span><strong>{stats.latest.value.toFixed(4)}</strong><small>{formatDate(stats.latest.timestamp)}{stats.daily == null ? '' : ` · 日涨跌 ${formatPercent(stats.daily)}`}</small></article>
                 <article><span>区间最高净值</span><strong>{stats.high.value.toFixed(4)}</strong><small>{formatDate(stats.high.timestamp)}</small></article>
                 <article><span>区间最低净值</span><strong>{stats.low.value.toFixed(4)}</strong><small>{formatDate(stats.low.timestamp)}</small></article>
+                <article><span>{days} 天总涨跌幅</span><strong className={stats.total >= 0 ? 'rise' : 'fall'}>{formatPercent(stats.total)}</strong><small>{stats.first.value.toFixed(4)} → {stats.latest.value.toFixed(4)}</small></article>
+                <article><span>较区间最高点回撤</span><strong className={stats.drawdown < 0 ? 'fall' : ''}>{stats.drawdown < 0 ? formatPercent(stats.drawdown) : '0.00%'}</strong><small>{stats.high.value.toFixed(4)} → {stats.latest.value.toFixed(4)}</small></article>
+                <article><span>较区间最低点涨幅</span><strong className={stats.rebound > 0 ? 'rise' : ''}>{stats.rebound > 0 ? formatPercent(stats.rebound) : '0.00%'}</strong><small>{stats.low.value.toFixed(4)} → {stats.latest.value.toFixed(4)}</small></article>
               </div>
               <div className="chart-card"><div className="chart-caption"><strong>单位净值走势</strong><span>{rangedPoints.length} 个净值日</span></div><TrendChart points={rangedPoints} /></div>
               <footer><span>数据来源：东方财富公开行情接口</span><span>统计区间：{formatDate(stats.first.timestamp)} — {formatDate(stats.latest.timestamp)}</span></footer>

@@ -38,13 +38,26 @@ function loadScript(url, { timeout = 15000, onLoad } = {}) {
   });
 }
 
-export function searchRemoteFunds(query) {
+export function searchRemoteFunds(query, { timeout = 10000 } = {}) {
   const key = String(query || '').trim();
   if (!key) return Promise.resolve([]);
   const callbackName = `FundSuggest_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
   const url = `https://fundsuggest.eastmoney.com/FundSearch/api/FundSearchAPI.ashx?m=1&key=${encodeURIComponent(key)}&callback=${callbackName}&_=${Date.now()}`;
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      clearTimeout(timer);
+      delete window[callbackName];
+    };
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const timer = setTimeout(() => fail(new Error(`搜索请求超时（${timeout / 1000}s），请检查网络或稍后重试`)), timeout);
+
     window[callbackName] = (payload) => {
       const rows = Array.isArray(payload?.Datas) ? payload.Datas : [];
       const funds = rows
@@ -55,14 +68,13 @@ export function searchRemoteFunds(query) {
           type: String(item.FundBaseInfo?.FTYPE || item.CATEGORYDESC || '基金').trim()
         }))
         .filter((item) => /^\d{6}$/.test(item.code));
-      delete window[callbackName];
+      if (settled) return;
+      settled = true;
+      cleanup();
       resolve(funds);
     };
 
-    loadScript(url).catch((error) => {
-      delete window[callbackName];
-      reject(error);
-    });
+    loadScript(url).catch((error) => fail(error instanceof Error ? error : new Error('搜索脚本加载失败，可能被浏览器插件拦截')));
   });
 }
 
