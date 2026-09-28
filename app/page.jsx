@@ -58,6 +58,33 @@ function TrendChart({ points }) {
   );
 }
 
+function SearchBox({ query, setQuery, results, searching, searchError, addFund, watch, className = '' }) {
+  return (
+    <div className={`search-box ${className}`}>
+      <span>⌕</span>
+      <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例如：沪深300 / 110020" aria-label="搜索基金" />
+      {query && <div className="search-results">
+        {searching && <div className="message">正在搜索全市场基金…</div>}
+        {!searching && searchError && <div className="message error">{searchError}</div>}
+        {!searching && !searchError && !results.length && <div className="message">未找到匹配基金</div>}
+        {!searching && results.map((fund) => <button key={fund.code} onClick={() => addFund(fund)}><span><strong>{fund.name}</strong><small>{fund.code} · {fund.type}</small></span><b>{watch.some((item) => item.code === fund.code) ? '✓' : '+'}</b></button>)}
+      </div>}
+    </div>
+  );
+}
+
+function useMobile(breakpoint = 900) {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const m = window.matchMedia(`(max-width: ${breakpoint}px)`);
+    const update = () => setIsMobile(m.matches);
+    update();
+    m.addEventListener('change', update);
+    return () => m.removeEventListener('change', update);
+  }, [breakpoint]);
+  return isMobile;
+}
+
 export default function Home() {
   const [watch, setWatch] = useState([]);
   const [selectedCode, setSelectedCode] = useState('');
@@ -72,6 +99,12 @@ export default function Home() {
   const [customDays, setCustomDays] = useState('');
   const debouncedQuery = useDebouncedValue(query, 320);
   const searchId = useRef(0);
+  const isMobile = useMobile();
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isMobile) setMobileDetailOpen(false);
+  }, [isMobile]);
 
   useEffect(() => {
     try {
@@ -151,9 +184,11 @@ export default function Home() {
   const addFund = (fund) => {
     if (!watch.some((item) => item.code === fund.code)) saveWatch([{ code: fund.code, name: fund.name }, ...watch]);
     setSelectedCode(fund.code);
+    if (isMobile) setMobileDetailOpen(true);
     setQuery('');
     setResults([]);
   };
+  const closeMobileDetail = () => setMobileDetailOpen(false);
   const removeFund = (code) => {
     const next = watch.filter((item) => item.code !== code);
     saveWatch(next);
@@ -166,27 +201,20 @@ export default function Home() {
   };
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${isMobile && mobileDetailOpen ? 'detail-open' : ''}`}>
       <header className="topbar">
         <div className="brand"><span className="brand-mark">⌁</span><span>基线</span><small>实时基金观察台</small></div>
+        {isMobile && <div className="topbar-search-wrap"><SearchBox query={query} setQuery={setQuery} results={results} searching={searching} searchError={searchError} addFund={addFund} watch={watch} /></div>}
         <div className="live-status"><i /> 东方财富实时数据</div>
       </header>
 
       <main className="workspace">
+        {isMobile && mobileDetailOpen && <div className="detail-scrim" onClick={closeMobileDetail} aria-hidden="true" />}
         <aside className="sidebar">
           <div className="sidebar-head">
             <h1>自选基金</h1>
             <p>搜索基金名称、拼音或 6 位代码</p>
-            <div className="search-box">
-              <span>⌕</span>
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例如：沪深300 / 110020" aria-label="搜索基金" />
-              {query && <div className="search-results">
-                {searching && <div className="message">正在搜索全市场基金…</div>}
-                {!searching && searchError && <div className="message error">{searchError}</div>}
-                {!searching && !searchError && !results.length && <div className="message">未找到匹配基金</div>}
-                {!searching && results.map((fund) => <button key={fund.code} onClick={() => addFund(fund)}><span><strong>{fund.name}</strong><small>{fund.code} · {fund.type}</small></span><b>{watch.some((item) => item.code === fund.code) ? '✓' : '+'}</b></button>)}
-              </div>}
-            </div>
+            <SearchBox query={query} setQuery={setQuery} results={results} searching={searching} searchError={searchError} addFund={addFund} watch={watch} />
           </div>
           <div className="list-caption">我的列表 · {watch.length}</div>
           <div className="watch-list">
@@ -197,10 +225,13 @@ export default function Home() {
               const latest = history?.at(-1);
               const previous = history?.at(-2);
               const change = latest && previous ? (latest.value / previous.value - 1) * 100 : null;
-              return <button className={`fund-row ${selectedCode === item.code ? 'active' : ''}`} key={item.code} onClick={() => setSelectedCode(item.code)}>
+              return <button className={`fund-row ${selectedCode === item.code ? 'active' : ''}`} key={item.code} onClick={() => { setSelectedCode(item.code); if (isMobile) setMobileDetailOpen(true); }}>
                 <span className="avatar">{item.name.slice(0, 2)}</span>
                 <span className="fund-title"><strong>{cached?.name || item.name}</strong><small>{item.code}</small></span>
-                <span className={change == null ? 'muted' : change >= 0 ? 'rise' : 'fall'}>{change == null ? '—' : formatPercent(change)}</span>
+                <span className="fund-meta">
+                  <span className={change == null ? 'muted' : change >= 0 ? 'rise' : 'fall'}>{change == null ? '—' : formatPercent(change)}</span>
+                  {latest && <span className="latest-value">{latest.value.toFixed(4)}</span>}
+                </span>
                 <span className="remove" role="button" tabIndex="0" aria-label={`移除${item.name}`} onClick={(event) => { event.stopPropagation(); removeFund(item.code); }}>×</span>
               </button>;
             })}
@@ -213,6 +244,7 @@ export default function Home() {
           {selectedCode && !loading && dataError && <div className="detail-empty"><strong>数据加载失败</strong><span>{dataError}</span><button onClick={() => { setFundCache((current) => ({ ...current, [selectedCode]: undefined })); }}>重新加载</button></div>}
           {selected && stats && <>
             <div className="detail-head">
+              {isMobile && <button className="mobile-back" onClick={closeMobileDetail} aria-label="返回自选">← 返回</button>}
               <div><span className="eyebrow">LIVE FUND OVERVIEW</span><h2>{selected.name}</h2><p>{selected.code} · 净值数据实时获取</p></div>
               <div className="latest"><small>最新单位净值</small><strong>{stats.latest.value.toFixed(4)}</strong><span>{formatDate(stats.latest.timestamp)}</span>{stats.daily != null && <span className={stats.daily >= 0 ? 'rise' : 'fall'}>日涨跌 {formatPercent(stats.daily)}</span>}</div>
             </div>
