@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchFundHistory, searchRemoteFunds } from './lib/fund-api';
+import { computeMacd } from './lib/indicators';
 
 const QUICK_DAYS = [7, 30, 90, 180, 365];
 const DEFAULT_CODES = ['110020', '161725', '270042'];
@@ -52,6 +53,46 @@ function TrendChart({ points }) {
       })}
       <path d={area} fill="url(#area-fill)" />
       <polyline points={polyline} />
+      <text x={padding.left} y={height - 9}>{formatDate(points[0].timestamp)}</text>
+      <text x={width - padding.right} y={height - 9} textAnchor="end">{formatDate(points.at(-1).timestamp)}</text>
+    </svg>
+  );
+}
+
+function MacdChart({ points }) {
+  const width = 900;
+  const height = 240;
+  const padding = { top: 24, right: 25, bottom: 34, left: 58 };
+  const values = points.flatMap((point) => [point.macd, point.signal, point.hist]);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || Math.max(Math.abs(max) * 0.04, 0.01);
+  const low = min - range * 0.12;
+  const high = max + range * 0.12;
+  const x = (index) => padding.left + (index / Math.max(points.length - 1, 1)) * (width - padding.left - padding.right);
+  const y = (value) => padding.top + ((high - value) / (high - low)) * (height - padding.top - padding.bottom);
+  const zeroY = y(0);
+  const barWidth = (width - padding.left - padding.right) / Math.max(points.length, 1) * 0.55;
+  const macdPolyline = points.map((point, index) => `${x(index)},${y(point.macd)}`).join(' ');
+  const signalPolyline = points.map((point, index) => `${x(index)},${y(point.signal)}`).join(' ');
+  const ticks = [0, 0.5, 1];
+
+  return (
+    <svg className="chart macd-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="MACD 走势图">
+      {ticks.map((tick) => {
+        const lineY = padding.top + tick * (height - padding.top - padding.bottom);
+        const value = high - tick * (high - low);
+        return <g key={tick}><line x1={padding.left} y1={lineY} x2={width - padding.right} y2={lineY} /><text x={padding.left - 10} y={lineY + 4}>{value.toFixed(3)}</text></g>;
+      })}
+      <line x1={padding.left} y1={zeroY} x2={width - padding.right} y2={zeroY} stroke="#68758a" strokeDasharray="4 4" />
+      {points.map((point, index) => {
+        const cx = x(index);
+        const top = Math.min(y(point.hist), zeroY);
+        const bottom = Math.max(y(point.hist), zeroY);
+        return <rect key={point.timestamp} x={cx - barWidth / 2} y={top} width={barWidth} height={Math.max(bottom - top, 1)} fill={point.hist >= 0 ? 'rgba(251,113,133,.55)' : 'rgba(52,211,153,.55)'} rx={1} />;
+      })}
+      <polyline points={macdPolyline} fill="none" style={{ stroke: '#5eead4' }} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+      <polyline points={signalPolyline} fill="none" style={{ stroke: '#f59e0b' }} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
       <text x={padding.left} y={height - 9}>{formatDate(points[0].timestamp)}</text>
       <text x={width - padding.right} y={height - 9} textAnchor="end">{formatDate(points.at(-1).timestamp)}</text>
     </svg>
@@ -157,6 +198,11 @@ export default function Home() {
 
   const selected = fundCache[selectedCode];
   const rangedPoints = useMemo(() => selected?.history.slice(-days) || [], [selected, days]);
+  const macdPoints = useMemo(() => {
+    if (!selected?.history) return [];
+    const all = computeMacd(selected.history);
+    return all.slice(-days);
+  }, [selected, days]);
   const stats = useMemo(() => {
     if (!rangedPoints.length) return null;
     const first = rangedPoints[0];
@@ -266,6 +312,7 @@ export default function Home() {
                 <article><span>较区间最低点涨幅</span><strong className={stats.rebound > 0 ? 'rise' : ''}>{stats.rebound > 0 ? formatPercent(stats.rebound) : '0.00%'}</strong><small>{stats.low.value.toFixed(4)} → {stats.latest.value.toFixed(4)}</small></article>
               </div>
               <div className="chart-card"><div className="chart-caption"><strong>单位净值走势</strong><span>{rangedPoints.length} 个净值日</span></div><TrendChart points={rangedPoints} /></div>
+              {macdPoints.length > 0 && <div className="chart-card macd-card"><div className="chart-caption"><strong>MACD 走势</strong><span>快线(青) · 慢线(橙) · 柱</span></div><MacdChart points={macdPoints} /></div>}
               <footer><span>数据来源：东方财富公开行情接口</span><span>统计区间：{formatDate(stats.first.timestamp)} — {formatDate(stats.latest.timestamp)}</span></footer>
             </div>
           </>}
