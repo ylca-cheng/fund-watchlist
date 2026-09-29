@@ -1,5 +1,7 @@
 'use client';
 
+import { inferSector } from './sectors';
+
 const PINGZHONG_KEYS = [
   'fS_code',
   'fS_name',
@@ -78,6 +80,29 @@ export function searchRemoteFunds(query, { timeout = 10000 } = {}) {
   });
 }
 
+const sectorHistoryCache = new Map();
+
+export async function fetchSectorHistory(tencentCode) {
+  if (!tencentCode) return [];
+  if (sectorHistoryCache.has(tencentCode)) return sectorHistoryCache.get(tencentCode);
+  try {
+    const res = await fetch(`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${encodeURIComponent(tencentCode)},day,,,500,qfq`);
+    const json = await res.json();
+    const list = json?.data?.[tencentCode]?.day || [];
+    const history = list
+      .map(([dateStr, , close]) => ({
+        timestamp: new Date(`${dateStr}T00:00:00`).getTime(),
+        value: Number(close)
+      }))
+      .filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.value))
+      .sort((a, b) => a.timestamp - b.timestamp);
+    sectorHistoryCache.set(tencentCode, history);
+    return history;
+  } catch {
+    return [];
+  }
+}
+
 export function fetchFundHistory(code) {
   const normalized = String(code || '').trim();
   if (!/^\d{6}$/.test(normalized)) return Promise.reject(new Error('基金代码格式不正确'));
@@ -100,10 +125,12 @@ export function fetchFundHistory(code) {
           .filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.value))
           .sort((a, b) => a.timestamp - b.timestamp);
         if (!history.length) throw new Error('该基金暂无净值历史');
+        const name = snapshot.fS_name || normalized;
         return {
           code: snapshot.fS_code || normalized,
-          name: snapshot.fS_name || normalized,
-          history
+          name,
+          history,
+          sector: inferSector(name)
         };
       }
     })

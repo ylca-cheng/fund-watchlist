@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchFundHistory, searchRemoteFunds } from './lib/fund-api';
+import { fetchFundHistory, fetchSectorHistory, searchRemoteFunds } from './lib/fund-api';
 import { computeMacd } from './lib/indicators';
 
 const QUICK_DAYS = [7, 30, 90, 180, 365];
@@ -181,6 +181,20 @@ export default function Home() {
   }, [selectedCode, fundCache]);
 
   useEffect(() => {
+    const fund = fundCache[selectedCode];
+    if (!fund?.sector?.code || fund.sectorHistory !== undefined) return;
+    let cancelled = false;
+    fetchSectorHistory(fund.sector.code).then((sectorHistory) => {
+      if (cancelled) return;
+      setFundCache((current) => ({
+        ...current,
+        [selectedCode]: { ...current[selectedCode], sectorHistory }
+      }));
+    });
+    return () => { cancelled = true; };
+  }, [fundCache, selectedCode]);
+
+  useEffect(() => {
     const value = debouncedQuery.trim();
     if (!value) {
       setResults([]);
@@ -199,8 +213,9 @@ export default function Home() {
   const selected = fundCache[selectedCode];
   const rangedPoints = useMemo(() => selected?.history.slice(-days) || [], [selected, days]);
   const macdPoints = useMemo(() => {
-    if (!selected?.history) return [];
-    const all = computeMacd(selected.history);
+    const history = selected?.sectorHistory;
+    if (!history?.length) return [];
+    const all = computeMacd(history);
     return all.slice(-days);
   }, [selected, days]);
   const stats = useMemo(() => {
@@ -273,7 +288,7 @@ export default function Home() {
               const change = latest && previous ? (latest.value / previous.value - 1) * 100 : null;
               return <button className={`fund-row ${selectedCode === item.code ? 'active' : ''}`} key={item.code} onClick={() => { setSelectedCode(item.code); if (isMobile) setMobileDetailOpen(true); }}>
                 <span className="avatar">{item.name.slice(0, 2)}</span>
-                <span className="fund-title"><strong>{cached?.name || item.name}</strong><small>{item.code}</small></span>
+                <span className="fund-title"><strong>{cached?.name || item.name}</strong><small>{item.code}{cached?.sector && ` · ${cached.sector.name}`}</small></span>
                 <span className="fund-meta">
                   <span className={change == null ? 'muted' : change >= 0 ? 'rise' : 'fall'}>{change == null ? '—' : formatPercent(change)}</span>
                   {latest && <span className="latest-value">{latest.value.toFixed(4)}</span>}
@@ -312,7 +327,7 @@ export default function Home() {
                 <article><span>较区间最低点涨幅</span><strong className={stats.rebound > 0 ? 'rise' : ''}>{stats.rebound > 0 ? formatPercent(stats.rebound) : '0.00%'}</strong><small>{stats.low.value.toFixed(4)} → {stats.latest.value.toFixed(4)}</small></article>
               </div>
               <div className="chart-card"><div className="chart-caption"><strong>单位净值走势</strong><span>{rangedPoints.length} 个净值日</span></div><TrendChart points={rangedPoints} /></div>
-              {macdPoints.length > 0 && <div className="chart-card macd-card"><div className="chart-caption"><strong>MACD 走势</strong><span>快线(青) · 慢线(橙) · 柱</span></div><MacdChart points={macdPoints} /></div>}
+              {macdPoints.length > 0 && selected?.sector && <div className="chart-card macd-card"><div className="chart-caption"><strong>MACD 走势 · {selected.sector.name}</strong><span>快线(青) · 慢线(橙) · 柱</span></div><MacdChart points={macdPoints} /></div>}
               <footer><span>数据来源：东方财富公开行情接口</span><span>统计区间：{formatDate(stats.first.timestamp)} — {formatDate(stats.latest.timestamp)}</span></footer>
             </div>
           </>}
